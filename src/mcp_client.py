@@ -71,3 +71,63 @@ async def call_tool(session: ClientSession, name: str, args: dict) -> Tuple[dict
     result = await session.call_tool(name, args)
     ms = int((time.perf_counter() - t0) * 1000)
     return dump(result), ms               # ← convierte CallToolResult a dict
+
+async def invoke_tool(session: ClientSession, name: str, args: dict = None) -> Dict[str, Any]:
+    """
+    Invoca una herramienta del servidor MCP y retorna solo el contenido del resultado.
+    
+    Args:
+        session: Sesión activa del cliente MCP
+        name: Nombre de la herramienta a invocar
+        args: Argumentos para la herramienta (opcional)
+        
+    Returns:
+        Dict con el contenido del resultado de la herramienta
+    """
+    if args is None:
+        args = {}
+    
+    try:
+        # Usar la función call_tool existente
+        result, execution_time = await call_tool(session, name, args)
+        
+        # Extraer el contenido del resultado
+        content = result.get("content", [])
+        
+        # Si el contenido es una lista, intentar extraer el texto o datos
+        if isinstance(content, list):
+            # Buscar contenido de tipo texto o datos
+            extracted_data = []
+            for item in content:
+                if isinstance(item, dict):
+                    if "text" in item:
+                        extracted_data.append(item["text"])
+                    elif "data" in item:
+                        extracted_data.append(item["data"])
+                    else:
+                        extracted_data.append(item)
+                else:
+                    extracted_data.append(item)
+            
+            # Si solo hay un elemento, devolverlo directamente
+            if len(extracted_data) == 1:
+                try:
+                    # Intentar parsear como JSON si es string
+                    if isinstance(extracted_data[0], str):
+                        return json.loads(extracted_data[0])
+                    return extracted_data[0]
+                except (json.JSONDecodeError, TypeError):
+                    return extracted_data[0]
+            
+            return extracted_data
+        
+        # Si el contenido no es una lista, devolverlo directamente
+        return content
+        
+    except Exception as e:
+        # Retornar un diccionario con el error
+        return {
+            "error": f"Error al invocar herramienta '{name}': {str(e)}",
+            "tool_name": name,
+            "args": args
+        }
