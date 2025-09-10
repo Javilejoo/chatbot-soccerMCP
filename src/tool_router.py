@@ -3,10 +3,11 @@ from dotenv import load_dotenv
 import os
 import asyncio
 import json
+import time
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
-from mcp_client import open_session, list_tools, invoke_tool
+from mcp_client import open_session, open_fs_session, list_tools, invoke_tool
 
 # Configuración
 load_dotenv()
@@ -35,21 +36,26 @@ def log_mcp_call(tool_name, parameters, result, execution_time_ms=None):
     except Exception as e:
         console.print(f"[dim red]Error guardando log: {e}[/dim red]")
 
-async def get_mcp_tools_as_openai_tools():
-    """Obtiene las herramientas del servidor MCP y las formatea para OpenAI"""
+async def get_all_mcp_tools_as_openai_tools():
+    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem) y las formatea para OpenAI"""
+    openai_tools = []
+    soccer_available = False
+    filesystem_available = False
+    
+    # ==================== SOCCER MCP SERVER ====================
     try:
+        console.print("[yellow]🔄 Conectando al servidor Soccer MCP...[/yellow]")
         async with open_session() as session:
-            # Obtener lista de herramientas con detalles
-            tools = await list_tools(session)
-            console.print(f"[green]✓ Conectado al servidor MCP. {len(tools)} herramientas disponibles.[/green]")
+            # Obtener lista de herramientas Soccer MCP
+            soccer_tools = await list_tools(session)
+            console.print(f"[green]✓ Soccer MCP conectado: {len(soccer_tools)} herramientas[/green]")
+            soccer_available = True
             
             # Log de la conexión inicial
-            log_mcp_call("CONNECTION", {"action": "list_tools"}, {"tools_count": len(tools), "tools": [t.get("name") for t in tools]})
+            log_mcp_call("SOCCER_CONNECTION", {"action": "list_tools"}, {"tools_count": len(soccer_tools), "tools": [t.get("name") for t in soccer_tools]})
             
-            # Convertir a formato OpenAI Tools con definiciones específicas
-            openai_tools = []
-            
-            for tool in tools:
+            # Convertir herramientas Soccer MCP a formato OpenAI
+            for tool in soccer_tools:
                 tool_name = tool.get("name")
                 
                 if tool_name == "get_competitions":
@@ -192,164 +198,524 @@ async def get_mcp_tools_as_openai_tools():
                         }
                     })
             
-            return openai_tools
     except Exception as e:
-        console.print(f"[bold red]Error conectando al servidor MCP: {str(e)}[/bold red]")
-        # Log de error
-        log_mcp_call("CONNECTION_ERROR", {}, {"error": str(e)})
-        return []
+        console.print(f"[bold red]⚠️ Error conectando al servidor Soccer MCP: {str(e)}[/bold red]")
+        log_mcp_call("SOCCER_CONNECTION_ERROR", {}, {"error": str(e)})
+    
+    # ==================== FILESYSTEM MCP SERVER ====================
+    try:
+        console.print("[yellow]🔄 Conectando al servidor Filesystem MCP...[/yellow]")
+        async with open_fs_session() as fs_session:
+            # Obtener lista de herramientas Filesystem MCP
+            fs_tools = await list_tools(fs_session)
+            console.print(f"[green]✓ Filesystem MCP conectado: {len(fs_tools)} herramientas[/green]")
+            filesystem_available = True
+            
+            # Log de la conexión al filesystem
+            log_mcp_call("FILESYSTEM_CONNECTION", {"action": "list_tools"}, {"tools_count": len(fs_tools), "tools": [t.get("name") for t in fs_tools]})
+            
+            # Convertir herramientas Filesystem MCP a formato OpenAI
+            for tool in fs_tools:
+                tool_name = tool.get("name")
+                
+                if tool_name == "read_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_file",
+                            "description": "Lee el contenido de un archivo del sistema de archivos",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo a leer"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "read_text_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_text_file",
+                            "description": "Lee el contenido de un archivo de texto específicamente",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo de texto a leer"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "read_media_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_media_file",
+                            "description": "Lee archivos multimedia (imágenes, audio, video) y devuelve información sobre el archivo",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo multimedia a leer"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "read_multiple_files":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_read_multiple_files",
+                            "description": "Lee múltiples archivos de una vez",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "paths": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "Lista de rutas de archivos a leer"
+                                    }
+                                },
+                                "required": ["paths"]
+                            }
+                        }
+                    })
+                elif tool_name == "write_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_write_file",
+                            "description": "Escribe contenido en un archivo del sistema de archivos",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo a escribir"
+                                    },
+                                    "content": {
+                                        "type": "string",
+                                        "description": "Contenido a escribir en el archivo"
+                                    }
+                                },
+                                "required": ["path", "content"]
+                            }
+                        }
+                    })
+                elif tool_name == "edit_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_edit_file",
+                            "description": "Edita partes específicas de un archivo existente",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo a editar"
+                                    },
+                                    "edits": {
+                                        "type": "array",
+                                        "description": "Lista de ediciones a realizar",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "oldText": {
+                                                    "type": "string",
+                                                    "description": "Texto a reemplazar"
+                                                },
+                                                "newText": {
+                                                    "type": "string",
+                                                    "description": "Nuevo texto"
+                                                }
+                                            },
+                                            "required": ["oldText", "newText"]
+                                        }
+                                    }
+                                },
+                                "required": ["path", "edits"]
+                            }
+                        }
+                    })
+                elif tool_name == "create_directory":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_create_directory",
+                            "description": "Crea un nuevo directorio",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del directorio a crear"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "list_directory":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_list_directory",
+                            "description": "Lista el contenido de un directorio",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del directorio a listar"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "list_directory_with_sizes":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_list_directory_with_sizes",
+                            "description": "Lista el contenido de un directorio incluyendo información de tamaño",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del directorio a listar"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "directory_tree":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_directory_tree",
+                            "description": "Muestra la estructura de árbol de un directorio",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del directorio para mostrar como árbol"
+                                    },
+                                    "depth": {
+                                        "type": "integer",
+                                        "description": "Profundidad máxima del árbol (opcional)"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "move_file":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_move_file",
+                            "description": "Mueve o renombra un archivo",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "source": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo origen"
+                                    },
+                                    "destination": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo destino"
+                                    }
+                                },
+                                "required": ["source", "destination"]
+                            }
+                        }
+                    })
+                elif tool_name == "search_files":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_search_files",
+                            "description": "Busca archivos en el sistema de archivos",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "pattern": {
+                                        "type": "string",
+                                        "description": "Patrón de búsqueda para los archivos"
+                                    },
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Directorio donde buscar (opcional)"
+                                    }
+                                },
+                                "required": ["pattern"]
+                            }
+                        }
+                    })
+                elif tool_name == "get_file_info":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_get_file_info",
+                            "description": "Obtiene información detallada de un archivo o directorio",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta del archivo o directorio"
+                                    }
+                                },
+                                "required": ["path"]
+                            }
+                        }
+                    })
+                elif tool_name == "list_allowed_directories":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "fs_list_allowed_directories",
+                            "description": "Lista los directorios a los que el servidor MCP tiene acceso",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    })
+            
+    except Exception as e:
+        console.print(f"[bold red]⚠️ Error conectando al servidor Filesystem MCP: {str(e)}[/bold red]")
+        log_mcp_call("FILESYSTEM_CONNECTION_ERROR", {}, {"error": str(e)})
+    
+    # ==================== RESUMEN ====================
+    status_parts = []
+    if soccer_available:
+        status_parts.append("⚽ Fútbol")
+    if filesystem_available:
+        status_parts.append("📁 Archivos")
+    
+    if status_parts:
+        console.print(f"[green]🎯 Servidores MCP activos: {' + '.join(status_parts)}[/green]")
+    else:
+        console.print(f"[bold red]❌ No se pudo conectar a ningún servidor MCP[/bold red]")
+    
+    console.print(f"[green]🛠️ Total herramientas disponibles: {len(openai_tools)}[/green]")
+    return openai_tools, soccer_available, filesystem_available
 
-async def execute_mcp_tool(session, tool_name, params=None):
-    """Ejecuta una herramienta específica en el servidor MCP usando una sesión existente"""
+async def execute_mcp_tool(soccer_session, fs_session, tool_name, params=None):
+    """Ejecuta una herramienta específica en el servidor MCP correspondiente"""
     start_time = datetime.now()
     try:
-        console.print(f"[yellow]→ Ejecutando herramienta MCP: {tool_name}[/yellow]")
+        console.print(f"[yellow]→ Ejecutando herramienta: {tool_name}[/yellow]")
         if params:
             console.print(f"[dim yellow]  Parámetros: {params}[/dim yellow]")
 
         import time
         t0 = time.perf_counter()
-        result = await invoke_tool(session, tool_name, params or {})
+        
+        # Determinar qué servidor usar basado en el prefijo de la herramienta
+        if tool_name.startswith("fs_"):
+            # Herramienta de filesystem - usar fs_session
+            if fs_session is None:
+                raise RuntimeError("Filesystem MCP no está disponible")
+            actual_tool_name = tool_name[3:]  # Remover prefijo 'fs_'
+            result = await invoke_tool(fs_session, actual_tool_name, params or {})
+            console.print(f"[green]✓ Herramienta filesystem ejecutada exitosamente[/green]")
+        else:
+            # Herramienta de soccer - usar soccer_session
+            if soccer_session is None:
+                raise RuntimeError("Soccer MCP no está disponible")
+            result = await invoke_tool(soccer_session, tool_name, params or {})
+            console.print(f"[green]✓ Herramienta soccer ejecutada exitosamente[/green]")
+        
         execution_time_ms = int((time.perf_counter() - t0) * 1000)
-        console.print(f"[green]✓ Herramienta ejecutada exitosamente[/green]")
-
         log_mcp_call(tool_name, params or {}, result, execution_time_ms)
-
         return result
+        
     except Exception as e:
         execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         error_result = {"error": str(e)}
         console.print(f"[red]Error ejecutando herramienta {tool_name}: {str(e)}[/red]")
-        # Log del error
         log_mcp_call(tool_name, params or {}, error_result, execution_time_ms)
         return error_result
 
 async def chat_with_mcp():
-    """Función principal para interactuar con el usuario y el servidor MCP"""
-    console.print(Panel.fit("⚽ [bold blue]Chatbot de Fútbol con MCP[/bold blue]", 
-                         subtitle="Pregunta sobre competiciones y equipos • Escribe 'salir' para terminar"))
+    """Función principal para interactuar con el usuario y los servidores MCP"""
+    console.print(Panel.fit("⚽📁 [bold blue]Chatbot MCP - Fútbol & Archivos[/bold blue]", 
+                         subtitle="Pregunta sobre fútbol o realiza operaciones con archivos • Escribe 'salir' para terminar"))
     
-    # Abrir UNA SOLA sesión MCP para toda la conversación
-    async with open_session() as mcp_session:
-        # Obtener las herramientas disponibles del servidor MCP
-        mcp_tools = await get_mcp_tools_as_openai_tools()
-        if not mcp_tools:
-            console.print("[bold red]No se pudieron cargar herramientas MCP. Verificar conexión al servidor.[/bold red]")
-            return
-        
-        console.print(f"[green]🛠️ Herramientas MCP disponibles: {len(mcp_tools)}[/green]")
-        for tool in mcp_tools:
+    # Obtener herramientas disponibles primero
+    mcp_tools, soccer_available, filesystem_available = await get_all_mcp_tools_as_openai_tools()
+    if not mcp_tools:
+        console.print("[bold red]No se pudieron cargar herramientas MCP. Verificar conexión a servidores.[/bold red]")
+        return
+    
+    # Mostrar herramientas disponibles
+    console.print(f"[green]🛠️ Total herramientas disponibles: {len(mcp_tools)}[/green]")
+    
+    if soccer_available:
+        soccer_tools = [tool for tool in mcp_tools if not tool['function']['name'].startswith('fs_')]
+        console.print(f"[yellow]⚽ Herramientas de Fútbol ({len(soccer_tools)}):[/yellow]")
+        for tool in soccer_tools:
             console.print(f"   • {tool['function']['name']}")
-        
-        # Mensaje del sistema para guiar a OpenAI
-        system_message = {
-            "role": "system", 
-            "content": """Eres un asistente especializado en información de fútbol. Tienes acceso a herramientas que te permiten:
+    
+    if filesystem_available:
+        fs_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('fs_')]
+        console.print(f"[blue]📁 Herramientas de Archivos ({len(fs_tools)}):[/blue]")
+        for tool in fs_tools:
+            console.print(f"   • {tool['function']['name'][3:]}")  # Sin prefijo fs_
 
-1. get_competitions: Obtener todas las competiciones de fútbol disponibles
-2. get_teams_competitions: Obtener equipos de una competición específica usando su ID
-3. get_teams_by_competition: Obtener todos los equipos de una competición específica
-4. get_matches_by_competition: Obtener todos los partidos de una competición específica
-5. get_team_by_id: Obtener información detallada de un equipo específico usando su ID
-6. get_top_scorers_by_competitions: Obtener los máximos goleadores de una competición específica
-7. get_player_by_id: Obtener información detallada de un jugador específico usando su ID
-8. get_info_matches_of_a_player: Obtener todos los partidos en los que ha participado un jugador específico
+    # Preparar capabilities antes de las conexiones
+    capabilities = []
+    if soccer_available:
+        capabilities.append("""INFORMACIÓN DE FÚTBOL:
+- get_competitions: Obtener todas las competiciones de fútbol disponibles
+- get_teams_competitions: Obtener equipos de una competición específica usando su ID
+- get_teams_by_competition: Obtener todos los equipos de una competición específica
+- get_matches_by_competition: Obtener todos los partidos de una competición específica
+- get_team_by_id: Obtener información detallada de un equipo específico usando su ID
+- get_top_scorers_by_competitions: Obtener los máximos goleadores de una competición específica
+- get_player_by_id: Obtener información detallada de un jugador específico usando su ID
+- get_info_matches_of_a_player: Obtener todos los partidos en los que ha participado un jugador específico
 
-Cuando el usuario pregunte sobre competiciones, equipos, jugadores, partidos o estadísticas, usa estas herramientas para dar información precisa y actualizada. 
+Ejemplos de IDs de competiciones: "PL" (Premier League), "CL" (Champions League), "DFB" (Bundesliga), "SA" (Serie A), "PD" (La Liga)""")
+    
+    if filesystem_available:
+        capabilities.append("""OPERACIONES CON ARCHIVOS:
+- fs_read_file: Leer el contenido de un archivo
+- fs_read_text_file: Leer archivos de texto específicamente
+- fs_read_media_file: Leer archivos multimedia (imágenes, audio, video)
+- fs_read_multiple_files: Leer múltiples archivos de una vez
+- fs_write_file: Escribir contenido a un archivo (crear o sobrescribir)
+- fs_edit_file: Editar partes específicas de un archivo existente
+- fs_create_directory: Crear un nuevo directorio
+- fs_list_directory: Listar archivos y directorios en una ruta
+- fs_list_directory_with_sizes: Listar directorio con información de tamaño
+- fs_directory_tree: Mostrar estructura de árbol de directorios
+- fs_move_file: Mover o renombrar archivos/directorios
+- fs_search_files: Buscar archivos por nombre o patrón
+- fs_get_file_info: Obtener información detallada de un archivo (tamaño, fecha, etc.)
+- fs_list_allowed_directories: Listar directorios accesibles por el servidor MCP""")
 
-Ejemplos de IDs de competiciones comunes:
-- "PL": Premier League
-- "CL": Champions League  
-- "DFB": Bundesliga
-- "SA": Serie A
-- "PD": La Liga
+    # Usar context managers para las sesiones MCP
+    if soccer_available and filesystem_available:
+        # Ambos servidores disponibles
+        async with open_session() as soccer_session, open_fs_session() as fs_session:
+            console.print("[green]✓ Conexiones a Soccer MCP y Filesystem MCP establecidas[/green]")
+            await run_chat_loop(soccer_session, fs_session, capabilities, mcp_tools)
+    elif soccer_available:
+        # Solo Soccer MCP disponible
+        async with open_session() as soccer_session:
+            console.print("[green]✓ Conexión a Soccer MCP establecida[/green]")
+            await run_chat_loop(soccer_session, None, capabilities, mcp_tools)
+    elif filesystem_available:
+        # Solo Filesystem MCP disponible
+        async with open_fs_session() as fs_session:
+            console.print("[green]✓ Conexión a Filesystem MCP establecida[/green]")
+            await run_chat_loop(None, fs_session, capabilities, mcp_tools)
+    else:
+        console.print("[bold red]No hay servidores MCP disponibles[/bold red]")
+        return
 
-Puedes responder preguntas sobre:
-- Competiciones disponibles
-- Equipos de competiciones específicas
-- Información detallada de equipos
-- Partidos de competiciones
-- Máximos goleadores
-- Información de jugadores específicos
-- Historial de partidos de jugadores
+async def run_chat_loop(soccer_session, fs_session, capabilities, mcp_tools):
+    """Ejecuta el bucle principal del chat con las sesiones proporcionadas"""
+    system_message = {
+        "role": "system", 
+        "content": f"""Eres un asistente inteligente con acceso a múltiples herramientas MCP. Puedes ayudar con:
 
-Siempre usa las herramientas disponibles para obtener información real antes de responder."""
-        }
-        
-        # Mantener historial de la conversación
-        messages = [system_message]
-        
-        console.print("\n[dim]Ejemplos de preguntas:[/dim]")
-        console.print("[dim]• ¿Qué competiciones están disponibles?[/dim]")
-        console.print("[dim]• ¿Qué equipos juegan en la Premier League?[/dim]")
-        console.print("[dim]• Muéstrame los equipos de la Champions League[/dim]")
-        console.print("[dim]• ¿Cuáles son los partidos de la Premier League?[/dim]")
-        console.print("[dim]• ¿Quiénes son los máximos goleadores de La Liga?[/dim]")
-        console.print("[dim]• Dame información del equipo con ID 86 (Real Madrid)[/dim]")
-        console.print("[dim]• ¿Qué información tienes del jugador con ID 44 (Cristiano Ronaldo)?[/dim]")
-        console.print(f"[dim cyan]📝 Los logs se guardan en: logs/mcp_calls.txt[/dim cyan]")
-        
-        while True:
-            # Obtener entrada del usuario
-            user_input = console.input("\n[bold green]Tú:[/bold green] ")
-            if user_input.lower() in ['salir', 'exit', 'quit']:
-                console.print("[yellow]¡Hasta pronto![/yellow]")
-                # Log del final de sesión
-                log_mcp_call("SESSION_END", {"user_action": "quit"}, {"message": "Usuario terminó la sesión"})
-                break
-            
-            # Log de la pregunta del usuario
-            log_mcp_call("USER_QUESTION", {"question": user_input}, {"status": "received"})
-            
-            # Agregar mensaje del usuario al historial
-            messages.append({"role": "user", "content": user_input})
-            
-            try:
-                # Primera llamada a OpenAI con las herramientas MCP disponibles
-                response = client.chat.completions.create(
-                    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                    messages=messages,
-                    tools=mcp_tools,
-                    tool_choice="auto"
+{chr(10).join(capabilities)}
+
+Siempre usa las herramientas apropiadas para responder con información precisa y actualizada. 
+Para operaciones con archivos, las rutas pueden ser absolutas o relativas al directorio de trabajo actual.
+Responde de manera clara y útil, organizando la información de forma legible."""
+    }
+
+    # Lista de mensajes de la conversación
+    messages = [system_message]
+
+    while True:
+        # Solicitar entrada del usuario
+        try:
+            user_input = console.input("\n[bold cyan]Tu pregunta:[/bold cyan] ")
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Saliendo...[/yellow]")
+            break
+        except EOFError:
+            console.print("\n[yellow]Saliendo...[/yellow]")
+            break
+
+        if user_input.lower() in ['salir', 'exit', 'quit']:
+            console.print("[yellow]¡Hasta luego![/yellow]")
+            break
+
+        # Agregar mensaje del usuario
+        messages.append({"role": "user", "content": user_input})
+
+        try:
+            # Llamar a OpenAI
+            console.print("[dim yellow]🤖 Procesando...[/dim yellow]")
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                tools=mcp_tools,
+                tool_choice="auto"
+            )
+
+            assistant_message = response.choices[0].message
+            messages.append(assistant_message)
+
+            # Procesar llamadas a herramientas
+            if assistant_message.tool_calls:
+                for tool_call in assistant_message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+
+                    # Ejecutar la herramienta MCP correspondiente
+                    tool_result = await execute_mcp_tool(soccer_session, fs_session, function_name, function_args)
+
+                    # Agregar resultado de la herramienta a los mensajes
+                    tool_message = {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": json.dumps(tool_result, ensure_ascii=False, indent=2)
+                    }
+                    messages.append(tool_message)
+
+                # Obtener respuesta final de OpenAI después de usar las herramientas
+                final_response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages
                 )
                 
-                assistant_message = response.choices[0].message
-                messages.append(assistant_message)
+                final_message = final_response.choices[0].message
+                messages.append(final_message)
                 
-                # Verificar si el modelo quiere usar alguna herramienta
-                if assistant_message.tool_calls:
-                    console.print("[dim cyan]🔧 OpenAI está usando herramientas MCP...[/dim cyan]")
-                    
-                    for tool_call in assistant_message.tool_calls:
-                        function_name = tool_call.function.name
-                        function_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                        
-                        # Ejecutar la herramienta MCP usando la sesión existente
-                        tool_result = await execute_mcp_tool(mcp_session, function_name, function_args)
-                        
-                        # Agregar la respuesta de la herramienta
-                        tool_response = {
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": json.dumps(tool_result, ensure_ascii=False)
-                        }
-                        messages.append(tool_response)
-                    
-                    # Segunda llamada con los resultados de las herramientas
-                    second_response = client.chat.completions.create(
-                        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                        messages=messages
-                    )
-                    
-                    final_response = second_response.choices[0].message
-                    messages.append(final_response)
-                    console.print(f"\n[bold blue]⚽ Asistente:[/bold blue] {final_response.content}")
-                else:
-                    # Si no se usaron herramientas, mostrar la respuesta directa
-                    console.print(f"\n[bold blue]⚽ Asistente:[/bold blue] {assistant_message.content}")
-                    
-            except Exception as e:
-                console.print(f"[bold red]Error: {str(e)}[/bold red]")
-                # Log del error
-                log_mcp_call("CHAT_ERROR", {"user_input": user_input}, {"error": str(e)})
+                console.print(f"\n[bold green]Asistente:[/bold green] {final_message.content}")
+            else:
+                # Respuesta directa sin herramientas
+                console.print(f"\n[bold green]Asistente:[/bold green] {assistant_message.content}")
+
+        except Exception as e:
+            console.print(f"[bold red]Error procesando respuesta: {str(e)}[/bold red]")
+            # No rompemos el bucle, permitimos que el usuario continúe

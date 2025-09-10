@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from tool_router import chat_with_mcp
 import asyncio
 
