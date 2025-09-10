@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
-from mcp_client import open_session, open_fs_session, list_tools, invoke_tool
+from mcp_client import open_session, open_fs_session, open_git_session, list_tools, invoke_tool
 
 # Configuración
 load_dotenv()
@@ -37,10 +37,11 @@ def log_mcp_call(tool_name, parameters, result, execution_time_ms=None):
         console.print(f"[dim red]Error guardando log: {e}[/dim red]")
 
 async def get_all_mcp_tools_as_openai_tools():
-    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem) y las formatea para OpenAI"""
+    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem + Git) y las formatea para OpenAI"""
     openai_tools = []
     soccer_available = False
     filesystem_available = False
+    git_available = False
     
     # ==================== SOCCER MCP SERVER ====================
     try:
@@ -506,13 +507,279 @@ async def get_all_mcp_tools_as_openai_tools():
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor Filesystem MCP: {str(e)}[/bold red]")
         log_mcp_call("FILESYSTEM_CONNECTION_ERROR", {}, {"error": str(e)})
-    
+
+    # ==================== GIT MCP SERVER ====================
+    try:
+        async with open_git_session() as git_session:
+            # Obtener lista de herramientas Git MCP
+            git_tools = await list_tools(git_session)
+            console.print(f"[green]✓ Git MCP conectado: {len(git_tools)} herramientas[/green]")
+            git_available = True
+            # Log de la conexión al git
+            log_mcp_call("GIT_CONNECTION", {"action": "list_tools"}, {"tools_count": len(git_tools), "tools": [t.get("name") for t in git_tools]})
+            # Convertir herramientas Git MCP a formato OpenAI
+            for tool in git_tools:
+                tool_name = tool.get("name")
+                if tool_name == "git_status":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_status",
+                            "description": "Obtiene el estado actual del repositorio Git",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_diff_unstaged":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_diff_unstaged",
+                            "description": "Muestra las diferencias de archivos no añadidos al área de preparación",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta específica del archivo (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_diff_staged":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_diff_staged",
+                            "description": "Muestra las diferencias de archivos en el área de preparación",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta específica del archivo (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_diff":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_diff",
+                            "description": "Muestra las diferencias entre commits, ramas o archivos",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "target": {
+                                        "type": "string",
+                                        "description": "Commit, rama o archivo para comparar (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_commit":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_commit",
+                            "description": "Realiza un commit con los archivos en el área de preparación",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {
+                                        "type": "string",
+                                        "description": "Mensaje del commit"
+                                    }
+                                },
+                                "required": ["message"]
+                            }
+                        }
+                    })
+                elif tool_name == "git_add":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_add",
+                            "description": "Añade archivos al área de preparación",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "paths": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "Lista de rutas de archivos o directorios a añadir"
+                                    }
+                                },
+                                "required": ["paths"]
+                            }
+                        }
+                    })
+                elif tool_name == "git_reset":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_reset",
+                            "description": "Resetea archivos del área de preparación o commits",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "paths": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "Lista de rutas de archivos a resetear (opcional)"
+                                    },
+                                    "mode": {
+                                        "type": "string",
+                                        "description": "Modo de reset: soft, mixed, hard (opcional)",
+                                        "enum": ["soft", "mixed", "hard"]
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_log":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_log",
+                            "description": "Muestra el historial de commits",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "max_count": {
+                                        "type": "integer",
+                                        "description": "Número máximo de commits a mostrar (opcional)"
+                                    },
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta específica para filtrar el historial (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_create_branch":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_create_branch",
+                            "description": "Crea una nueva rama en el repositorio Git",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Nombre de la nueva rama"
+                                    }
+                                },
+                                "required": ["name"]
+                            }
+                        }
+                    })
+                elif tool_name == "git_checkout":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_checkout",
+                            "description": "Cambia a una rama o commit específico",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "target": {
+                                        "type": "string",
+                                        "description": "Nombre de la rama o hash del commit"
+                                    }
+                                },
+                                "required": ["target"]
+                            }
+                        }
+                    })
+                elif tool_name == "git_show":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_show",
+                            "description": "Muestra información detallada de un commit específico",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "commit": {
+                                        "type": "string",
+                                        "description": "Hash del commit o referencia (opcional, por defecto HEAD)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_init":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_init",
+                            "description": "Inicializa un nuevo repositorio Git",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Ruta donde inicializar el repositorio (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                elif tool_name == "git_branch":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "git_branch",
+                            "description": "Lista, crea o elimina ramas",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Nombre de la rama para crear o eliminar (opcional)"
+                                    },
+                                    "delete": {
+                                        "type": "boolean",
+                                        "description": "Si es true, elimina la rama especificada (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+    except Exception as e:
+        console.print(f"[bold red]⚠️ Error conectando al servidor Git MCP: {str(e)}[/bold red]")
+        log_mcp_call("GIT_CONNECTION_ERROR", {}, {"error": str(e)})
+
     # ==================== RESUMEN ====================
     status_parts = []
     if soccer_available:
         status_parts.append("⚽ Fútbol")
     if filesystem_available:
         status_parts.append("📁 Archivos")
+    if git_available:
+        status_parts.append("🧑‍💻 Git")
     
     if status_parts:
         console.print(f"[green]🎯 Servidores MCP activos: {' + '.join(status_parts)}[/green]")
@@ -520,9 +787,9 @@ async def get_all_mcp_tools_as_openai_tools():
         console.print(f"[bold red]❌ No se pudo conectar a ningún servidor MCP[/bold red]")
     
     console.print(f"[green]🛠️ Total herramientas disponibles: {len(openai_tools)}[/green]")
-    return openai_tools, soccer_available, filesystem_available
+    return openai_tools, soccer_available, filesystem_available, git_available
 
-async def execute_mcp_tool(soccer_session, fs_session, tool_name, params=None):
+async def execute_mcp_tool(soccer_session, fs_session, git_session, tool_name, params=None):
     """Ejecuta una herramienta específica en el servidor MCP correspondiente"""
     start_time = datetime.now()
     try:
@@ -541,6 +808,13 @@ async def execute_mcp_tool(soccer_session, fs_session, tool_name, params=None):
             actual_tool_name = tool_name[3:]  # Remover prefijo 'fs_'
             result = await invoke_tool(fs_session, actual_tool_name, params or {})
             console.print(f"[green]✓ Herramienta filesystem ejecutada exitosamente[/green]")
+        elif tool_name.startswith("git_") or tool_name in ["git_status", "git_diff_unstaged", "git_diff_staged", "git_diff", "git_commit", "git_add", "git_reset", "git_log", "git_create_branch", "git_checkout", "git_show", "git_init", "git_branch"]:
+            # Herramienta de git - usar git_session
+            if git_session is None:
+                raise RuntimeError("Git MCP no está disponible")
+            # No remover prefijo para estas herramientas ya que todas empiezan con git_
+            result = await invoke_tool(git_session, tool_name, params or {})
+            console.print(f"[green]✓ Herramienta git ejecutada exitosamente[/green]")
         else:
             # Herramienta de soccer - usar soccer_session
             if soccer_session is None:
@@ -565,7 +839,7 @@ async def chat_with_mcp():
                          subtitle="Pregunta sobre fútbol o realiza operaciones con archivos • Escribe 'salir' para terminar"))
     
     # Obtener herramientas disponibles primero
-    mcp_tools, soccer_available, filesystem_available = await get_all_mcp_tools_as_openai_tools()
+    mcp_tools, soccer_available, filesystem_available, git_available = await get_all_mcp_tools_as_openai_tools()
     if not mcp_tools:
         console.print("[bold red]No se pudieron cargar herramientas MCP. Verificar conexión a servidores.[/bold red]")
         return
@@ -584,6 +858,12 @@ async def chat_with_mcp():
         console.print(f"[blue]📁 Herramientas de Archivos ({len(fs_tools)}):[/blue]")
         for tool in fs_tools:
             console.print(f"   • {tool['function']['name'][3:]}")  # Sin prefijo fs_
+    
+    if git_available:
+        git_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('git_')]
+        console.print(f"[magenta]🧑‍💻 Herramientas de Git ({len(git_tools)}):[/magenta]")
+        for tool in git_tools:
+            console.print(f"   • {tool['function']['name']}")  # Sin remover prefijo ya que todas empiezan con git_
 
     # Preparar capabilities antes de las conexiones
     capabilities = []
@@ -616,28 +896,49 @@ Ejemplos de IDs de competiciones: "PL" (Premier League), "CL" (Champions League)
 - fs_search_files: Buscar archivos por nombre o patrón
 - fs_get_file_info: Obtener información detallada de un archivo (tamaño, fecha, etc.)
 - fs_list_allowed_directories: Listar directorios accesibles por el servidor MCP""")
+        
+    if git_available:
+        capabilities.append("""OPERACIONES CON GIT:
+- git_status: Obtener el estado actual del repositorio Git
+- git_diff_unstaged: Mostrar diferencias de archivos no añadidos al área de preparación
+- git_diff_staged: Mostrar diferencias de archivos en el área de preparación
+- git_diff: Mostrar diferencias entre commits, ramas o archivos
+- git_commit: Realizar un commit con los archivos en el área de preparación
+- git_add: Añadir archivos al área de preparación
+- git_reset: Resetear archivos del área de preparación o commits
+- git_log: Mostrar el historial de commits
+- git_create_branch: Crear una nueva rama en el repositorio Git
+- git_checkout: Cambiar a una rama o commit específico
+- git_show: Mostrar información detallada de un commit específico
+- git_init: Inicializar un nuevo repositorio Git
+- git_branch: Listar, crear o eliminar ramas""")
 
     # Usar context managers para las sesiones MCP
-    if soccer_available and filesystem_available:
+    if soccer_available and filesystem_available and git_available:
         # Ambos servidores disponibles
-        async with open_session() as soccer_session, open_fs_session() as fs_session:
-            console.print("[green]✓ Conexiones a Soccer MCP y Filesystem MCP establecidas[/green]")
-            await run_chat_loop(soccer_session, fs_session, capabilities, mcp_tools)
+        async with open_session() as soccer_session, open_fs_session() as fs_session, open_git_session() as git_session:
+            console.print("[green]✓ Conexiones a Soccer MCP, Filesystem MCP y Git MCP establecidas[/green]")
+            await run_chat_loop(soccer_session, fs_session, git_session, capabilities, mcp_tools)
     elif soccer_available:
         # Solo Soccer MCP disponible
         async with open_session() as soccer_session:
             console.print("[green]✓ Conexión a Soccer MCP establecida[/green]")
-            await run_chat_loop(soccer_session, None, capabilities, mcp_tools)
+            await run_chat_loop(soccer_session, None, None, capabilities, mcp_tools)
     elif filesystem_available:
         # Solo Filesystem MCP disponible
         async with open_fs_session() as fs_session:
             console.print("[green]✓ Conexión a Filesystem MCP establecida[/green]")
-            await run_chat_loop(None, fs_session, capabilities, mcp_tools)
+            await run_chat_loop(None, fs_session, None, capabilities, mcp_tools)
+    elif git_available:
+        # Solo Git MCP disponible
+        async with open_git_session() as git_session:
+            console.print("[green]✓ Conexión a Git MCP establecida[/green]")
+            await run_chat_loop(None, None, git_session, capabilities, mcp_tools)
     else:
         console.print("[bold red]No hay servidores MCP disponibles[/bold red]")
         return
 
-async def run_chat_loop(soccer_session, fs_session, capabilities, mcp_tools):
+async def run_chat_loop(soccer_session, fs_session, git_session, capabilities, mcp_tools):
     """Ejecuta el bucle principal del chat con las sesiones proporcionadas"""
     system_message = {
         "role": "system", 
@@ -691,7 +992,7 @@ Responde de manera clara y útil, organizando la información de forma legible."
                     function_args = json.loads(tool_call.function.arguments)
 
                     # Ejecutar la herramienta MCP correspondiente
-                    tool_result = await execute_mcp_tool(soccer_session, fs_session, function_name, function_args)
+                    tool_result = await execute_mcp_tool(soccer_session, fs_session, git_session, function_name, function_args)
 
                     # Agregar resultado de la herramienta a los mensajes
                     tool_message = {

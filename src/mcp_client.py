@@ -74,6 +74,20 @@ async def open_fs_session():
         async with ClientSession(read, write) as session:
             yield session
 
+@asynccontextmanager
+async def open_git_session():
+    cmd  = os.getenv("GIT_MCP_COMMAND")
+    args = (os.getenv("GIT_MCP_ARGS") or "").split("|") if os.getenv("GIT_MCP_ARGS") else []
+    cwd  = os.getenv("GIT_MCP_CWD") or None
+    if not cmd:
+        raise RuntimeError("GIT_MCP_COMMAND no está configurado en .env")
+
+    params = StdioServerParameters(command=cmd, args=args, cwd=cwd)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
+
 async def list_tools(session: ClientSession) -> List[Dict]:
     listing = await session.list_tools()
     listing_dict = dump(listing)          # ← convierte ListToolsResult a dict
