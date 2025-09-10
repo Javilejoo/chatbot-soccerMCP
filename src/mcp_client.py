@@ -61,6 +61,19 @@ async def open_session():
             await session.initialize()
             yield session
 
+@asynccontextmanager
+async def open_fs_session():
+    cmd  = os.getenv("FS_MCP_COMMAND")
+    args = (os.getenv("FS_MCP_ARGS") or "").split("|") if os.getenv("FS_MCP_ARGS") else []
+    cwd  = os.getenv("FS_MCP_CWD") or None
+    if not cmd:
+        raise RuntimeError("FS_MCP_COMMAND no está configurado en .env")
+
+    params = StdioServerParameters(command=cmd, args=args, cwd=cwd)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            yield session
+
 async def list_tools(session: ClientSession) -> List[Dict]:
     listing = await session.list_tools()
     listing_dict = dump(listing)          # ← convierte ListToolsResult a dict
