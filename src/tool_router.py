@@ -37,168 +37,61 @@ def log_mcp_call(tool_name, parameters, result, execution_time_ms=None):
         console.print(f"[dim red]Error guardando log: {e}[/dim red]")
 
 async def get_all_mcp_tools_as_openai_tools():
-    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem + Git + One Piece) y las formatea para OpenAI"""
+    """Obtiene las herramientas de todos los servidores MCP y las formatea para OpenAI"""
     openai_tools = []
-    soccer_available = False
-    filesystem_available = False
-    git_available = False
-    op_available = False
+    server_availability = {
+        "soccer": False,
+        "filesystem": False, 
+        "git": False,
+        "op": False
+    }
+    
+    # Listas separadas para cada servidor para mostrar correctamente
+    tools_by_server = {
+        "soccer": [],
+        "filesystem": [],
+        "git": [],
+        "op": []
+    }
+    
+    def add_tools_from_server(tools, server_name, server_key, prefix=""):
+        """Helper function para agregar herramientas de un servidor con conversión automática"""
+        for tool in tools:
+            tool_name = tool.get("name")
+            tool_description = tool.get("description", f"Herramienta de {server_name}: {tool_name}")
+            tool_input_schema = tool.get("inputSchema", {
+                "type": "object",
+                "properties": {},
+                "required": []
+            })
+            
+            # Aplicar prefijo si se especifica
+            final_name = f"{prefix}{tool_name}" if prefix else tool_name
+            
+            tool_dict = {
+                "type": "function",
+                "function": {
+                    "name": final_name,
+                    "description": tool_description,
+                    "parameters": tool_input_schema
+                }
+            }
+            
+            openai_tools.append(tool_dict)
+            tools_by_server[server_key].append(tool_dict)
     
     # ==================== SOCCER MCP SERVER ====================
     try:
         console.print("[yellow]🔄 Conectando al servidor Soccer MCP...[/yellow]")
         async with open_session() as session:
-            # Obtener lista de herramientas Soccer MCP
             soccer_tools = await list_tools(session)
             console.print(f"[green]✓ Soccer MCP conectado: {len(soccer_tools)} herramientas[/green]")
-            soccer_available = True
+            server_availability["soccer"] = True
             
-            # Log de la conexión inicial
             log_mcp_call("SOCCER_CONNECTION", {"action": "list_tools"}, {"tools_count": len(soccer_tools), "tools": [t.get("name") for t in soccer_tools]})
             
-            # Convertir herramientas Soccer MCP a formato OpenAI
-            for tool in soccer_tools:
-                tool_name = tool.get("name")
-                
-                if tool_name == "get_competitions":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_competitions",
-                            "description": "Obtiene todas las competiciones de fútbol disponibles con sus IDs y nombres",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "get_teams_competitions":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_teams_competitions",
-                            "description": "Obtiene los equipos de una competición específica de fútbol",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "competition_id": {
-                                        "type": "string",
-                                        "description": "ID de la competición (ej: 'PL' para Premier League, 'CL' para Champions League)"
-                                    }
-                                },
-                                "required": ["competition_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_teams_by_competition":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_teams_by_competition",
-                            "description": "Obtiene todos los equipos de una competición específica",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "competition_id": {
-                                        "type": "string",
-                                        "description": "ID de la competición (ej: 'PL' para Premier League, 'CL' para Champions League)"
-                                    }
-                                },
-                                "required": ["competition_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_matches_by_competition":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_matches_by_competition",
-                            "description": "Obtiene todos los partidos de una competición específica",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "competition_id": {
-                                        "type": "string",
-                                        "description": "ID de la competición (ej: 'PL' para Premier League, 'CL' para Champions League)"
-                                    }
-                                },
-                                "required": ["competition_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_team_by_id":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_team_by_id",
-                            "description": "Obtiene información detallada de un equipo específico",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "team_id": {
-                                        "type": "string",
-                                        "description": "ID del equipo"
-                                    }
-                                },
-                                "required": ["team_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_top_scorers_by_competitions":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_top_scorers_by_competitions",
-                            "description": "Obtiene los máximos goleadores de una competición específica",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "competition_id": {
-                                        "type": "string",
-                                        "description": "ID de la competición (ej: 'PL' para Premier League, 'CL' para Champions League)"
-                                    }
-                                },
-                                "required": ["competition_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_player_by_id":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_player_by_id",
-                            "description": "Obtiene información detallada de un jugador específico",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "player_id": {
-                                        "type": "string",
-                                        "description": "ID del jugador"
-                                    }
-                                },
-                                "required": ["player_id"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_info_matches_of_a_player":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "get_info_matches_of_a_player",
-                            "description": "Obtiene todos los partidos en los que ha participado un jugador específico",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "player_id": {
-                                        "type": "string",
-                                        "description": "ID del jugador"
-                                    }
-                                },
-                                "required": ["player_id"]
-                            }
-                        }
-                    })
+            # ✨ CONVERSIÓN AUTOMÁTICA
+            add_tools_from_server(soccer_tools, "fútbol", "soccer")
             
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor Soccer MCP: {str(e)}[/bold red]")
@@ -210,117 +103,13 @@ async def get_all_mcp_tools_as_openai_tools():
         async with open_op_session() as op_session:
             op_tools = await list_tools(op_session)
             console.print(f"[green]✓ One Piece MCP conectado: {len(op_tools)} herramientas[/green]")
-            op_available = True
+            server_availability["op"] = True
+            
             log_mcp_call("ONEPIECE_CONNECTION", {"action": "list_tools"}, {"tools_count": len(op_tools), "tools": [t.get("name") for t in op_tools]})
 
-            for tool in op_tools:
-                tool_name = tool.get("name")
-
-                if tool_name == "op_get_character":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "op_get_character",
-                            "description": "Obtiene información detallada de un personaje de One Piece por su nombre",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Nombre del personaje de One Piece"
-                                    }
-                                },
-                                "required": ["name"]
-                            }
-                        }
-                    })
-
-                elif tool_name == "op_get_characters":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "op_get_characters",
-                            "description": "Obtiene la lista completa de todos los personajes de One Piece disponibles en la API",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": []
-                            }
-                        }
-                    })
-
-                elif tool_name == "op_get_character_by_id":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "op_get_character_by_id",
-                            "description": "Obtiene información detallada de un personaje de One Piece por su ID",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {
-                                        "type": "string",
-                                        "description": "ID del personaje de One Piece"
-                                    }
-                                },
-                                "required": ["id"]
-                            }
-                        }
-                    })
-
-                elif tool_name == "op_search_characters":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "op_search_characters",
-                            "description": "Busca personajes de One Piece usando filtros opcionales como nombre, trabajo, recompensa, edad o tamaño",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Nombre del personaje a buscar (opcional)"
-                                    },
-                                    "job": {
-                                        "type": "string",
-                                        "description": "Trabajo o profesión del personaje (opcional)"
-                                    },
-                                    "bounty": {
-                                        "type": "string",
-                                        "description": "Recompensa del personaje (opcional)"
-                                    },
-                                    "age": {
-                                        "type": "string",
-                                        "description": "Edad del personaje (opcional)"
-                                    },
-                                    "size": {
-                                        "type": "string",
-                                        "description": "Tamaño del personaje (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                
-                # Agregar cualquier otra herramienta que no esté específicamente mapeada
-                else:
-                    # Obtener descripción del tool original o usar una genérica
-                    tool_description = tool.get("description", f"Herramienta de One Piece: {tool_name}")
-                    tool_input_schema = tool.get("inputSchema", {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    })
-                    
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "description": tool_description,
-                            "parameters": tool_input_schema
-                        }
-                    })
+            # ✨ CONVERSIÓN AUTOMÁTICA
+            add_tools_from_server(op_tools, "One Piece", "op")
+            
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor One Piece MCP: {str(e)}[/bold red]")
         log_mcp_call("ONEPIECE_CONNECTION_ERROR", {}, {"error": str(e)})
@@ -329,302 +118,14 @@ async def get_all_mcp_tools_as_openai_tools():
     try:
         console.print("[yellow]🔄 Conectando al servidor Filesystem MCP...[/yellow]")
         async with open_fs_session() as fs_session:
-            # Obtener lista de herramientas Filesystem MCP
             fs_tools = await list_tools(fs_session)
             console.print(f"[green]✓ Filesystem MCP conectado: {len(fs_tools)} herramientas[/green]")
-            filesystem_available = True
+            server_availability["filesystem"] = True
             
-            # Log de la conexión al filesystem
             log_mcp_call("FILESYSTEM_CONNECTION", {"action": "list_tools"}, {"tools_count": len(fs_tools), "tools": [t.get("name") for t in fs_tools]})
             
-            # Convertir herramientas Filesystem MCP a formato OpenAI
-            for tool in fs_tools:
-                tool_name = tool.get("name")
-                
-                if tool_name == "read_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_read_file",
-                            "description": "Lee el contenido de un archivo del sistema de archivos",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo a leer"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "read_text_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_read_text_file",
-                            "description": "Lee el contenido de un archivo de texto específicamente",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo de texto a leer"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "read_media_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_read_media_file",
-                            "description": "Lee archivos multimedia (imágenes, audio, video) y devuelve información sobre el archivo",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo multimedia a leer"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "read_multiple_files":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_read_multiple_files",
-                            "description": "Lee múltiples archivos de una vez",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "paths": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "description": "Lista de rutas de archivos a leer"
-                                    }
-                                },
-                                "required": ["paths"]
-                            }
-                        }
-                    })
-                elif tool_name == "write_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_write_file",
-                            "description": "Escribe contenido en un archivo del sistema de archivos",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo a escribir"
-                                    },
-                                    "content": {
-                                        "type": "string",
-                                        "description": "Contenido a escribir en el archivo"
-                                    }
-                                },
-                                "required": ["path", "content"]
-                            }
-                        }
-                    })
-                elif tool_name == "edit_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_edit_file",
-                            "description": "Edita partes específicas de un archivo existente",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo a editar"
-                                    },
-                                    "edits": {
-                                        "type": "array",
-                                        "description": "Lista de ediciones a realizar",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "oldText": {
-                                                    "type": "string",
-                                                    "description": "Texto a reemplazar"
-                                                },
-                                                "newText": {
-                                                    "type": "string",
-                                                    "description": "Nuevo texto"
-                                                }
-                                            },
-                                            "required": ["oldText", "newText"]
-                                        }
-                                    }
-                                },
-                                "required": ["path", "edits"]
-                            }
-                        }
-                    })
-                elif tool_name == "create_directory":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_create_directory",
-                            "description": "Crea un nuevo directorio",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del directorio a crear"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "list_directory":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_list_directory",
-                            "description": "Lista el contenido de un directorio",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del directorio a listar"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "list_directory_with_sizes":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_list_directory_with_sizes",
-                            "description": "Lista el contenido de un directorio incluyendo información de tamaño",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del directorio a listar"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "directory_tree":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_directory_tree",
-                            "description": "Muestra la estructura de árbol de un directorio",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del directorio para mostrar como árbol"
-                                    },
-                                    "depth": {
-                                        "type": "integer",
-                                        "description": "Profundidad máxima del árbol (opcional)"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "move_file":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_move_file",
-                            "description": "Mueve o renombra un archivo",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "source": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo origen"
-                                    },
-                                    "destination": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo destino"
-                                    }
-                                },
-                                "required": ["source", "destination"]
-                            }
-                        }
-                    })
-                elif tool_name == "search_files":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_search_files",
-                            "description": "Busca archivos en el sistema de archivos",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "pattern": {
-                                        "type": "string",
-                                        "description": "Patrón de búsqueda para los archivos"
-                                    },
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Directorio donde buscar (opcional)"
-                                    }
-                                },
-                                "required": ["pattern"]
-                            }
-                        }
-                    })
-                elif tool_name == "get_file_info":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_get_file_info",
-                            "description": "Obtiene información detallada de un archivo o directorio",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta del archivo o directorio"
-                                    }
-                                },
-                                "required": ["path"]
-                            }
-                        }
-                    })
-                elif tool_name == "list_allowed_directories":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "fs_list_allowed_directories",
-                            "description": "Lista los directorios a los que el servidor MCP tiene acceso",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": []
-                            }
-                        }
-                    })
+            # ✨ CONVERSIÓN AUTOMÁTICA con prefijo fs_ para evitar conflictos
+            add_tools_from_server(fs_tools, "sistema de archivos", "filesystem", "fs_")
             
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor Filesystem MCP: {str(e)}[/bold red]")
@@ -633,276 +134,28 @@ async def get_all_mcp_tools_as_openai_tools():
     # ==================== GIT MCP SERVER ====================
     try:
         async with open_git_session() as git_session:
-            # Obtener lista de herramientas Git MCP
             git_tools = await list_tools(git_session)
             console.print(f"[green]✓ Git MCP conectado: {len(git_tools)} herramientas[/green]")
-            git_available = True
-            # Log de la conexión al git
+            server_availability["git"] = True
+            
             log_mcp_call("GIT_CONNECTION", {"action": "list_tools"}, {"tools_count": len(git_tools), "tools": [t.get("name") for t in git_tools]})
-            # Convertir herramientas Git MCP a formato OpenAI
-            for tool in git_tools:
-                tool_name = tool.get("name")
-                if tool_name == "git_status":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_status",
-                            "description": "Obtiene el estado actual del repositorio Git",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_diff_unstaged":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_diff_unstaged",
-                            "description": "Muestra las diferencias de archivos no añadidos al área de preparación",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta específica del archivo (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_diff_staged":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_diff_staged",
-                            "description": "Muestra las diferencias de archivos en el área de preparación",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta específica del archivo (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_diff":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_diff",
-                            "description": "Muestra las diferencias entre commits, ramas o archivos",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "target": {
-                                        "type": "string",
-                                        "description": "Commit, rama o archivo para comparar (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_commit":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_commit",
-                            "description": "Realiza un commit con los archivos en el área de preparación",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "message": {
-                                        "type": "string",
-                                        "description": "Mensaje del commit"
-                                    }
-                                },
-                                "required": ["message"]
-                            }
-                        }
-                    })
-                elif tool_name == "git_add":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_add",
-                            "description": "Añade archivos al área de preparación",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "paths": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "description": "Lista de rutas de archivos o directorios a añadir"
-                                    }
-                                },
-                                "required": ["paths"]
-                            }
-                        }
-                    })
-                elif tool_name == "git_reset":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_reset",
-                            "description": "Resetea archivos del área de preparación o commits",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "paths": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "description": "Lista de rutas de archivos a resetear (opcional)"
-                                    },
-                                    "mode": {
-                                        "type": "string",
-                                        "description": "Modo de reset: soft, mixed, hard (opcional)",
-                                        "enum": ["soft", "mixed", "hard"]
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_log":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_log",
-                            "description": "Muestra el historial de commits",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "max_count": {
-                                        "type": "integer",
-                                        "description": "Número máximo de commits a mostrar (opcional)"
-                                    },
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta específica para filtrar el historial (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_create_branch":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_create_branch",
-                            "description": "Crea una nueva rama en el repositorio Git",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Nombre de la nueva rama"
-                                    }
-                                },
-                                "required": ["name"]
-                            }
-                        }
-                    })
-                elif tool_name == "git_checkout":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_checkout",
-                            "description": "Cambia a una rama o commit específico",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "target": {
-                                        "type": "string",
-                                        "description": "Nombre de la rama o hash del commit"
-                                    }
-                                },
-                                "required": ["target"]
-                            }
-                        }
-                    })
-                elif tool_name == "git_show":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_show",
-                            "description": "Muestra información detallada de un commit específico",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "commit": {
-                                        "type": "string",
-                                        "description": "Hash del commit o referencia (opcional, por defecto HEAD)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_init":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_init",
-                            "description": "Inicializa un nuevo repositorio Git",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "path": {
-                                        "type": "string",
-                                        "description": "Ruta donde inicializar el repositorio (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
-                elif tool_name == "git_branch":
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": "git_branch",
-                            "description": "Lista, crea o elimina ramas",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "description": "Nombre de la rama para crear o eliminar (opcional)"
-                                    },
-                                    "delete": {
-                                        "type": "boolean",
-                                        "description": "Si es true, elimina la rama especificada (opcional)"
-                                    }
-                                },
-                                "required": []
-                            }
-                        }
-                    })
+            
+            # ✨ CONVERSIÓN AUTOMÁTICA
+            add_tools_from_server(git_tools, "Git", "git")
+            
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor Git MCP: {str(e)}[/bold red]")
         log_mcp_call("GIT_CONNECTION_ERROR", {}, {"error": str(e)})
 
     # ==================== RESUMEN ====================
     status_parts = []
-    if soccer_available:
+    if server_availability["soccer"]:
         status_parts.append("⚽ Fútbol")
-    if filesystem_available:
+    if server_availability["filesystem"]:
         status_parts.append("📁 Archivos")
-    if git_available:
+    if server_availability["git"]:
         status_parts.append("🧑‍💻 Git")
-    if op_available:
+    if server_availability["op"]:
         status_parts.append("🏴‍☠️ One Piece")
     
     if status_parts:
@@ -911,7 +164,9 @@ async def get_all_mcp_tools_as_openai_tools():
         console.print(f"[bold red]❌ No se pudo conectar a ningún servidor MCP[/bold red]")
     
     console.print(f"[green]🛠️ Total herramientas disponibles: {len(openai_tools)}[/green]")
-    return openai_tools, soccer_available, filesystem_available, git_available, op_available
+    
+    # Retornar tanto las herramientas como la disponibilidad individual para compatibilidad
+    return openai_tools, server_availability["soccer"], server_availability["filesystem"], server_availability["git"], server_availability["op"], tools_by_server
 
 async def execute_mcp_tool(soccer_session, fs_session, git_session, op_session, tool_name, params=None):
     """Ejecuta una herramienta específica en el servidor MCP correspondiente"""
@@ -970,7 +225,7 @@ async def chat_with_mcp():
                          subtitle="Pregunta sobre fútbol o realiza operaciones con archivos • Escribe 'salir' para terminar"))
     
     # Obtener herramientas disponibles primero
-    mcp_tools, soccer_available, filesystem_available, git_available, op_available = await get_all_mcp_tools_as_openai_tools()
+    mcp_tools, soccer_available, filesystem_available, git_available, op_available, tools_by_server = await get_all_mcp_tools_as_openai_tools()
     if not mcp_tools:
         console.print("[bold red]No se pudieron cargar herramientas MCP. Verificar conexión a servidores.[/bold red]")
         return
@@ -979,83 +234,75 @@ async def chat_with_mcp():
     console.print(f"[green]🛠️ Total herramientas disponibles: {len(mcp_tools)}[/green]")
     
     if soccer_available:
-        soccer_tools = [tool for tool in mcp_tools if not tool['function']['name'].startswith('fs_')]
+        soccer_tools = tools_by_server["soccer"]
         console.print(f"[yellow]⚽ Herramientas de Fútbol ({len(soccer_tools)}):[/yellow]")
         for tool in soccer_tools:
             console.print(f"   • {tool['function']['name']}")
     
     if filesystem_available:
-        fs_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('fs_')]
+        fs_tools = tools_by_server["filesystem"]
         console.print(f"[blue]📁 Herramientas de Archivos ({len(fs_tools)}):[/blue]")
         for tool in fs_tools:
             console.print(f"   • {tool['function']['name'][3:]}")  # Sin prefijo fs_
     
     if git_available:
-        git_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('git_')]
+        git_tools = tools_by_server["git"]
         console.print(f"[magenta]🧑‍💻 Herramientas de Git ({len(git_tools)}):[/magenta]")
         for tool in git_tools:
-            console.print(f"   • {tool['function']['name']}")  # Sin remover prefijo ya que todas empiezan con git_
+            console.print(f"   • {tool['function']['name']}")
 
     if op_available:
-        op_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('op_')]
+        op_tools = tools_by_server["op"]
         console.print(f"[cyan]🏴‍☠️ Herramientas de One Piece ({len(op_tools)}):[/cyan]")
         for tool in op_tools:
-            console.print(f"   • {tool['function']['name']}")  # Mostrar nombre completo con prefijo op_
-    # Preparar capabilities antes de las conexiones
-    capabilities = []
-    if soccer_available:
-        capabilities.append("""INFORMACIÓN DE FÚTBOL:
-- get_competitions: Obtener todas las competiciones de fútbol disponibles
-- get_teams_competitions: Obtener equipos de una competición específica usando su ID
-- get_teams_by_competition: Obtener todos los equipos de una competición específica
-- get_matches_by_competition: Obtener todos los partidos de una competición específica
-- get_team_by_id: Obtener información detallada de un equipo específico usando su ID
-- get_top_scorers_by_competitions: Obtener los máximos goleadores de una competición específica
-- get_player_by_id: Obtener información detallada de un jugador específico usando su ID
-- get_info_matches_of_a_player: Obtener todos los partidos en los que ha participado un jugador específico
-
-Ejemplos de IDs de competiciones: "PL" (Premier League), "CL" (Champions League), "DFB" (Bundesliga), "SA" (Serie A), "PD" (La Liga)""")
-    
-    if filesystem_available:
-        capabilities.append("""OPERACIONES CON ARCHIVOS:
-- fs_read_file: Leer el contenido de un archivo
-- fs_read_text_file: Leer archivos de texto específicamente
-- fs_read_media_file: Leer archivos multimedia (imágenes, audio, video)
-- fs_read_multiple_files: Leer múltiples archivos de una vez
-- fs_write_file: Escribir contenido a un archivo (crear o sobrescribir)
-- fs_edit_file: Editar partes específicas de un archivo existente
-- fs_create_directory: Crear un nuevo directorio
-- fs_list_directory: Listar archivos y directorios en una ruta
-- fs_list_directory_with_sizes: Listar directorio con información de tamaño
-- fs_directory_tree: Mostrar estructura de árbol de directorios
-- fs_move_file: Mover o renombrar archivos/directorios
-- fs_search_files: Buscar archivos por nombre o patrón
-- fs_get_file_info: Obtener información detallada de un archivo (tamaño, fecha, etc.)
-- fs_list_allowed_directories: Listar directorios accesibles por el servidor MCP""")
+            console.print(f"   • {tool['function']['name']}")
+    # Generar capabilities dinámicamente desde las herramientas disponibles
+    def generate_capabilities_from_tools(tools_dict):
+        capabilities = []
         
-    if git_available:
-        capabilities.append("""OPERACIONES CON GIT:
-- git_status: Obtener el estado actual del repositorio Git
-- git_diff_unstaged: Mostrar diferencias de archivos no añadidos al área de preparación
-- git_diff_staged: Mostrar diferencias de archivos en el área de preparación
-- git_diff: Mostrar diferencias entre commits, ramas o archivos
-- git_commit: Realizar un commit con los archivos en el área de preparación
-- git_add: Añadir archivos al área de preparación
-- git_reset: Resetear archivos del área de preparación o commits
-- git_log: Mostrar el historial de commits
-- git_create_branch: Crear una nueva rama en el repositorio Git
-- git_checkout: Cambiar a una rama o commit específico
-- git_show: Mostrar información detallada de un commit específico
-- git_init: Inicializar un nuevo repositorio Git
-- git_branch: Listar, crear o eliminar ramas""")
+        server_names = {
+            'soccer': 'INFORMACIÓN DE FÚTBOL',
+            'op': 'INFORMACIÓN DE ONE PIECE', 
+            'filesystem': 'OPERACIONES CON ARCHIVOS',
+            'git': 'OPERACIONES CON GIT'
+        }
+        
+        server_examples = {
+            'soccer': 'Ejemplos de IDs de competiciones: "PL" (Premier League), "CL" (Champions League), "DFB" (Bundesliga), "SA" (Serie A), "PD" (La Liga)',
+            'filesystem': 'Las rutas pueden ser absolutas o relativas al directorio de trabajo actual',
+            'git': 'Recuerda estar en un directorio con repositorio Git inicializado',
+            'op': 'Puedes buscar por nombre exacto o usar filtros para búsquedas avanzadas'
+        }
+        
+        for server_key, tools in tools_dict.items():
+            if tools:  # Si hay herramientas disponibles para este servidor
+                server_name = server_names.get(server_key, f'HERRAMIENTAS DE {server_key.upper()}')
+                tool_descriptions = []
+                
+                for tool in tools:
+                    # Generar descripción automática basada en el nombre y descripción de la herramienta
+                    tool_name = tool['function']['name']
+                    tool_desc = tool['function']['description']
+                    
+                    # Para filesystem, mostrar sin el prefijo fs_ para mejor legibilidad
+                    if server_key == 'filesystem' and tool_name.startswith('fs_'):
+                        display_name = tool_name[3:]  # Remover prefijo fs_
+                    else:
+                        display_name = tool_name
+                    
+                    tool_descriptions.append(f"- {display_name}: {tool_desc}")
+                
+                capability_text = f"{server_name}:\n" + "\n".join(tool_descriptions)
+                
+                # Agregar ejemplos/notas específicas si existen
+                if server_key in server_examples:
+                    capability_text += f"\n\n{server_examples[server_key]}"
+                
+                capabilities.append(capability_text)
+        
+        return capabilities
     
-    if op_available:
-        capabilities.append("""INFORMACIÓN DE ONE PIECE:
-- op_get_characters: Obtener la lista completa de todos los personajes de One Piece
-- op_get_character: Obtener información de un personaje específico por nombre
-- op_get_character_by_id: Obtener información de un personaje específico por ID
-- op_search_characters: Buscar personajes usando filtros (nombre, trabajo, recompensa, edad, tamaño)
-                            """)
+    capabilities = generate_capabilities_from_tools(tools_by_server)
     # Usar context managers para las sesiones MCP
     if soccer_available and filesystem_available and git_available and op_available:
         # Ambos servidores disponibles
