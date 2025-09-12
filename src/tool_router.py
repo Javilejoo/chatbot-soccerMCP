@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
-from mcp_client import open_session, open_fs_session, open_git_session, list_tools, invoke_tool
+from mcp_client import open_session, open_op_session, open_fs_session, open_git_session, list_tools, invoke_tool
 
 # Configuración
 load_dotenv()
@@ -37,11 +37,12 @@ def log_mcp_call(tool_name, parameters, result, execution_time_ms=None):
         console.print(f"[dim red]Error guardando log: {e}[/dim red]")
 
 async def get_all_mcp_tools_as_openai_tools():
-    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem + Git) y las formatea para OpenAI"""
+    """Obtiene las herramientas de ambos servidores MCP (Soccer + Filesystem + Git + One Piece) y las formatea para OpenAI"""
     openai_tools = []
     soccer_available = False
     filesystem_available = False
     git_available = False
+    op_available = False
     
     # ==================== SOCCER MCP SERVER ====================
     try:
@@ -202,6 +203,127 @@ async def get_all_mcp_tools_as_openai_tools():
     except Exception as e:
         console.print(f"[bold red]⚠️ Error conectando al servidor Soccer MCP: {str(e)}[/bold red]")
         log_mcp_call("SOCCER_CONNECTION_ERROR", {}, {"error": str(e)})
+
+    # ==================== ONE PIECE MCP SERVER ====================
+    try:
+        console.print("[yellow]🔄 Conectando al servidor One Piece MCP...[/yellow]")
+        async with open_op_session() as op_session:
+            op_tools = await list_tools(op_session)
+            console.print(f"[green]✓ One Piece MCP conectado: {len(op_tools)} herramientas[/green]")
+            op_available = True
+            log_mcp_call("ONEPIECE_CONNECTION", {"action": "list_tools"}, {"tools_count": len(op_tools), "tools": [t.get("name") for t in op_tools]})
+
+            for tool in op_tools:
+                tool_name = tool.get("name")
+
+                if tool_name == "op_get_character":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "op_get_character",
+                            "description": "Obtiene información detallada de un personaje de One Piece por su nombre",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Nombre del personaje de One Piece"
+                                    }
+                                },
+                                "required": ["name"]
+                            }
+                        }
+                    })
+
+                elif tool_name == "op_get_characters":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "op_get_characters",
+                            "description": "Obtiene la lista completa de todos los personajes de One Piece disponibles en la API",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    })
+
+                elif tool_name == "op_get_character_by_id":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "op_get_character_by_id",
+                            "description": "Obtiene información detallada de un personaje de One Piece por su ID",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "ID del personaje de One Piece"
+                                    }
+                                },
+                                "required": ["id"]
+                            }
+                        }
+                    })
+
+                elif tool_name == "op_search_characters":
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": "op_search_characters",
+                            "description": "Busca personajes de One Piece usando filtros opcionales como nombre, trabajo, recompensa, edad o tamaño",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Nombre del personaje a buscar (opcional)"
+                                    },
+                                    "job": {
+                                        "type": "string",
+                                        "description": "Trabajo o profesión del personaje (opcional)"
+                                    },
+                                    "bounty": {
+                                        "type": "string",
+                                        "description": "Recompensa del personaje (opcional)"
+                                    },
+                                    "age": {
+                                        "type": "string",
+                                        "description": "Edad del personaje (opcional)"
+                                    },
+                                    "size": {
+                                        "type": "string",
+                                        "description": "Tamaño del personaje (opcional)"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    })
+                
+                # Agregar cualquier otra herramienta que no esté específicamente mapeada
+                else:
+                    # Obtener descripción del tool original o usar una genérica
+                    tool_description = tool.get("description", f"Herramienta de One Piece: {tool_name}")
+                    tool_input_schema = tool.get("inputSchema", {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    })
+                    
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": tool_description,
+                            "parameters": tool_input_schema
+                        }
+                    })
+    except Exception as e:
+        console.print(f"[bold red]⚠️ Error conectando al servidor One Piece MCP: {str(e)}[/bold red]")
+        log_mcp_call("ONEPIECE_CONNECTION_ERROR", {}, {"error": str(e)})
     
     # ==================== FILESYSTEM MCP SERVER ====================
     try:
@@ -780,6 +902,8 @@ async def get_all_mcp_tools_as_openai_tools():
         status_parts.append("📁 Archivos")
     if git_available:
         status_parts.append("🧑‍💻 Git")
+    if op_available:
+        status_parts.append("🏴‍☠️ One Piece")
     
     if status_parts:
         console.print(f"[green]🎯 Servidores MCP activos: {' + '.join(status_parts)}[/green]")
@@ -787,9 +911,9 @@ async def get_all_mcp_tools_as_openai_tools():
         console.print(f"[bold red]❌ No se pudo conectar a ningún servidor MCP[/bold red]")
     
     console.print(f"[green]🛠️ Total herramientas disponibles: {len(openai_tools)}[/green]")
-    return openai_tools, soccer_available, filesystem_available, git_available
+    return openai_tools, soccer_available, filesystem_available, git_available, op_available
 
-async def execute_mcp_tool(soccer_session, fs_session, git_session, tool_name, params=None):
+async def execute_mcp_tool(soccer_session, fs_session, git_session, op_session, tool_name, params=None):
     """Ejecuta una herramienta específica en el servidor MCP correspondiente"""
     start_time = datetime.now()
     try:
@@ -815,6 +939,13 @@ async def execute_mcp_tool(soccer_session, fs_session, git_session, tool_name, p
             # No remover prefijo para estas herramientas ya que todas empiezan con git_
             result = await invoke_tool(git_session, tool_name, params or {})
             console.print(f"[green]✓ Herramienta git ejecutada exitosamente[/green]")
+        elif tool_name.startswith("op_"):
+            # Herramienta de One Piece - usar op_session
+            if op_session is None:
+                raise RuntimeError("One Piece MCP no está disponible")
+            # No remover prefijo para las herramientas de One Piece
+            result = await invoke_tool(op_session, tool_name, params or {})
+            console.print(f"[green]✓ Herramienta One Piece ejecutada exitosamente[/green]")
         else:
             # Herramienta de soccer - usar soccer_session
             if soccer_session is None:
@@ -835,11 +966,11 @@ async def execute_mcp_tool(soccer_session, fs_session, git_session, tool_name, p
 
 async def chat_with_mcp():
     """Función principal para interactuar con el usuario y los servidores MCP"""
-    console.print(Panel.fit("⚽📁 [bold blue]Chatbot MCP - Fútbol & Archivos[/bold blue]", 
+    console.print(Panel.fit("⚽📁 [bold blue]Chatbot MCP - Fútbol, Archivos, Git & One Piece[/bold blue]", 
                          subtitle="Pregunta sobre fútbol o realiza operaciones con archivos • Escribe 'salir' para terminar"))
     
     # Obtener herramientas disponibles primero
-    mcp_tools, soccer_available, filesystem_available, git_available = await get_all_mcp_tools_as_openai_tools()
+    mcp_tools, soccer_available, filesystem_available, git_available, op_available = await get_all_mcp_tools_as_openai_tools()
     if not mcp_tools:
         console.print("[bold red]No se pudieron cargar herramientas MCP. Verificar conexión a servidores.[/bold red]")
         return
@@ -865,6 +996,11 @@ async def chat_with_mcp():
         for tool in git_tools:
             console.print(f"   • {tool['function']['name']}")  # Sin remover prefijo ya que todas empiezan con git_
 
+    if op_available:
+        op_tools = [tool for tool in mcp_tools if tool['function']['name'].startswith('op_')]
+        console.print(f"[cyan]🏴‍☠️ Herramientas de One Piece ({len(op_tools)}):[/cyan]")
+        for tool in op_tools:
+            console.print(f"   • {tool['function']['name']}")  # Mostrar nombre completo con prefijo op_
     # Preparar capabilities antes de las conexiones
     capabilities = []
     if soccer_available:
@@ -912,33 +1048,45 @@ Ejemplos de IDs de competiciones: "PL" (Premier League), "CL" (Champions League)
 - git_show: Mostrar información detallada de un commit específico
 - git_init: Inicializar un nuevo repositorio Git
 - git_branch: Listar, crear o eliminar ramas""")
-
+    
+    if op_available:
+        capabilities.append("""INFORMACIÓN DE ONE PIECE:
+- op_get_characters: Obtener la lista completa de todos los personajes de One Piece
+- op_get_character: Obtener información de un personaje específico por nombre
+- op_get_character_by_id: Obtener información de un personaje específico por ID
+- op_search_characters: Buscar personajes usando filtros (nombre, trabajo, recompensa, edad, tamaño)
+                            """)
     # Usar context managers para las sesiones MCP
-    if soccer_available and filesystem_available and git_available:
+    if soccer_available and filesystem_available and git_available and op_available:
         # Ambos servidores disponibles
-        async with open_session() as soccer_session, open_fs_session() as fs_session, open_git_session() as git_session:
-            console.print("[green]✓ Conexiones a Soccer MCP, Filesystem MCP y Git MCP establecidas[/green]")
-            await run_chat_loop(soccer_session, fs_session, git_session, capabilities, mcp_tools)
+        async with open_session() as soccer_session, open_fs_session() as fs_session, open_git_session() as git_session, open_op_session() as op_session:
+            console.print("[green]✓ Conexiones a Soccer MCP, Filesystem MCP, Git MCP y One Piece MCP establecidas[/green]")
+            await run_chat_loop(soccer_session, fs_session, git_session, op_session, capabilities, mcp_tools)
     elif soccer_available:
         # Solo Soccer MCP disponible
         async with open_session() as soccer_session:
             console.print("[green]✓ Conexión a Soccer MCP establecida[/green]")
-            await run_chat_loop(soccer_session, None, None, capabilities, mcp_tools)
+            await run_chat_loop(soccer_session, None, None, None, capabilities, mcp_tools)
     elif filesystem_available:
         # Solo Filesystem MCP disponible
         async with open_fs_session() as fs_session:
             console.print("[green]✓ Conexión a Filesystem MCP establecida[/green]")
-            await run_chat_loop(None, fs_session, None, capabilities, mcp_tools)
+            await run_chat_loop(None, fs_session, None, None, capabilities, mcp_tools)
     elif git_available:
         # Solo Git MCP disponible
         async with open_git_session() as git_session:
             console.print("[green]✓ Conexión a Git MCP establecida[/green]")
-            await run_chat_loop(None, None, git_session, capabilities, mcp_tools)
+            await run_chat_loop(None, None, git_session, None, capabilities, mcp_tools)
+    elif op_available:
+        # Solo One Piece MCP disponible
+        async with open_op_session() as op_session:
+            console.print("[green]✓ Conexión a One Piece MCP establecida[/green]")
+            await run_chat_loop(None, None, None, op_session, capabilities, mcp_tools)
     else:
         console.print("[bold red]No hay servidores MCP disponibles[/bold red]")
         return
 
-async def run_chat_loop(soccer_session, fs_session, git_session, capabilities, mcp_tools):
+async def run_chat_loop(soccer_session, fs_session, git_session, op_session, capabilities, mcp_tools):
     """Ejecuta el bucle principal del chat con las sesiones proporcionadas"""
     system_message = {
         "role": "system", 
@@ -992,7 +1140,7 @@ Responde de manera clara y útil, organizando la información de forma legible."
                     function_args = json.loads(tool_call.function.arguments)
 
                     # Ejecutar la herramienta MCP correspondiente
-                    tool_result = await execute_mcp_tool(soccer_session, fs_session, git_session, function_name, function_args)
+                    tool_result = await execute_mcp_tool(soccer_session, fs_session, git_session, op_session, function_name, function_args)
 
                     # Agregar resultado de la herramienta a los mensajes
                     tool_message = {
